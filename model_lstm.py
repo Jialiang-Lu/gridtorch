@@ -126,7 +126,6 @@ class GridTorch(nn.Module):
         for t in x: # get rnn output predictions
             h_t, c_t = self.rnn(t, (h_t, c_t))
 
-
             bottleneck_activations = self.dropout(self.bottleneck(h_t))
 
             pc_preds = self.pc_logits(bottleneck_activations)

@@ -22,7 +22,7 @@ Adapted for pytorch, Lucas Pompe, 2019
 import numpy as np
 import utils
 
-import model_snu as model
+#import model_snu as model
 import ensembles
 from dataloading import Dataset
 from model_utils import get_latest_model_file, get_model_epoch
@@ -30,8 +30,6 @@ from model_utils import get_latest_model_file, get_model_epoch
 import torch
 from torch.utils import data
 from torch import nn
-
-from rate_coding import PadCoder
 
 N_EPOCHS = 1000
 STEPS_PER_EPOCH = 100
@@ -50,85 +48,9 @@ PAUSE_TIME = None
 SAVE_LOC = 'experiments/'
 
 
-torch.manual_seed(SEED)
-np.random.seed(SEED)
-
-
-# CUDA for PyTorch
-# https://stanford.edu/~shervine/blog/pytorch-how-to-generate-data-parallel
-use_cuda = torch.cuda.is_available()
-device = torch.device("cuda:0" if use_cuda else "cpu")
-print("USING DEVICE:", device)
-# Parameters
-data_params = {'batch_size': BATCH_SIZE,
-          'shuffle': True,
-          'num_workers': 6, # num cpus,
-          }
-
-test_params = {'batch_size': 100,
-          'shuffle': True,
-          'num_workers': 2, # num cpus,
-          }
-
-dataset = Dataset(batch_size=data_params['batch_size'])
-data_generator = data.DataLoader(dataset, **data_params)
-test_generator = data.DataLoader(dataset, **test_params)
-
-# Create the ensembles that provide targets during training
-place_cell_ensembles = utils.get_place_cell_ensembles(
-        env_size=ENV_SIZE,
-        neurons_seed=SEED,
-        targets_type='softmax',
-        lstm_init_type='softmax',
-        n_pc=N_PC,
-        pc_scale=[0.01])
-
-head_direction_ensembles = utils.get_head_direction_ensembles(
-        neurons_seed=SEED,
-        targets_type='softmax',
-        lstm_init_type='softmax',
-        n_hdc=N_HDC,
-        hdc_concentration=[20.])
-
-target_ensembles = place_cell_ensembles + head_direction_ensembles
-
-
-
-
-
-model = model.GridTorch(target_ensembles, (BATCH_SIZE, 100, 3)).cuda()
-params = model.parameters()
-
-
-
-
-
-saved_model_file = get_latest_model_file(SAVE_LOC)
-start_epoch = 0
-
-if saved_model_file:
-    state_dict = torch.load(saved_model_file)
-    if use_cuda:
-        for k, v in state_dict.items():
-            state_dict[k] = v.cuda()
-    model.load_state_dict(state_dict)
-    start_epoch = get_model_epoch(saved_model_file)
-    print("RESTORING MODEL AT:", saved_model_file)
-    print("STARTING AT EPOCH:", start_epoch)
-
-
-
-#loss ops:
-logsoftmax = nn.LogSoftmax(dim=-1)
 def cross_entropy(pred, soft_targets):
     return torch.sum(- soft_targets * logsoftmax(pred), -1)
 
-#Optimisation opts
-optimiser = torch.optim.RMSprop(params,
-                                    lr=LR,
-                                    momentum=MOMENTUM,
-                                    alpha=0.9,
-                                    eps=1e-10)
 
 
 to_cuda = lambda x:x.cuda()
@@ -196,10 +118,90 @@ def get_loss(logits_pc, logits_hd, pc_targets, hd_targets, bottleneck_acts):
     return torch.mean(pc_loss + hd_loss)
 
 
-coder = PadCoder(3)
+coder = None
 
 
 if __name__ == '__main__':
+    
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    
+    
+    #Optimisation opts
+    optimiser = torch.optim.RMSprop(params,
+                                        lr=LR,
+                                        momentum=MOMENTUM,
+                                        alpha=0.9,
+                                        eps=1e-10)
+
+
+    # CUDA for PyTorch
+    # https://stanford.edu/~shervine/blog/pytorch-how-to-generate-data-parallel
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda:0" if use_cuda else "cpu")
+    print("USING DEVICE:", device)
+    # Parameters
+    data_params = {'batch_size': BATCH_SIZE,
+              'shuffle': True,
+              'num_workers': 6, # num cpus,
+              }
+
+    test_params = {'batch_size': 100,
+              'shuffle': True,
+              'num_workers': 2, # num cpus,
+              }
+
+    dataset = Dataset(batch_size=data_params['batch_size'])
+    data_generator = data.DataLoader(dataset, **data_params)
+    test_generator = data.DataLoader(dataset, **test_params)
+
+    # Create the ensembles that provide targets during training
+    place_cell_ensembles = utils.get_place_cell_ensembles(
+            env_size=ENV_SIZE,
+            neurons_seed=SEED,
+            targets_type='softmax',
+            lstm_init_type='softmax',
+            n_pc=N_PC,
+            pc_scale=[0.01])
+
+    head_direction_ensembles = utils.get_head_direction_ensembles(
+            neurons_seed=SEED,
+            targets_type='softmax',
+            lstm_init_type='softmax',
+            n_hdc=N_HDC,
+            hdc_concentration=[20.])
+
+    target_ensembles = place_cell_ensembles + head_direction_ensembles
+
+
+
+
+
+    model = model.GridTorch(target_ensembles, (BATCH_SIZE, 100, 3)).cuda()
+    params = model.parameters()
+
+
+
+
+
+    saved_model_file = get_latest_model_file(SAVE_LOC)
+    start_epoch = 0
+
+    if saved_model_file:
+        state_dict = torch.load(saved_model_file)
+        if use_cuda:
+            for k, v in state_dict.items():
+                state_dict[k] = v.cuda()
+        model.load_state_dict(state_dict)
+        start_epoch = get_model_epoch(saved_model_file)
+        print("RESTORING MODEL AT:", saved_model_file)
+        print("STARTING AT EPOCH:", start_epoch)
+
+
+
+    #loss ops:
+    logsoftmax = nn.LogSoftmax(dim=-1)
+
     torch.save(target_ensembles, SAVE_LOC + 'target_ensembles.pt')
     torch.save(model.state_dict(), SAVE_LOC + 'model_epoch_0.pt')
 
@@ -220,13 +222,13 @@ if __name__ == '__main__':
             target_pos,
             target_hd,
             initial_conds,
-            ensembles_targets) = encode_inputs(X, y, place_cell_ensembles, head_direction_ensembles, coder=coder)
+            ensembles_targets) = encode_inputs(X, y, place_cell_ensembles, head_direction_ensembles)
 
 
 
             outs  = model.forward(inputs, initial_conds)
 
-            bottleneck_acts, logits_pc, logits_hd, pc_targets, hd_targets = decode_outputs(outs, ensembles_targets, coder=coder)
+            bottleneck_acts, logits_pc, logits_hd, pc_targets, hd_targets = decode_outputs(outs, ensembles_targets)
             loss = get_loss(logits_pc, logits_hd, pc_targets, hd_targets, bottleneck_acts)
 
             loss += model.l2_loss * WEIGHT_DECAY
