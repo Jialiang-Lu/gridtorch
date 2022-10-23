@@ -64,7 +64,6 @@ class GridTorch(nn.Module):
 
         self.dropout = nn.Dropout(dropoutrates_bottleneck)
 
-
         with torch.no_grad():
             self.state_embed.weight = init_trunc_normal(self.state_embed.weight, 128)
             self.cell_embed.weight = init_trunc_normal(self.cell_embed.weight, 128)
@@ -86,9 +85,8 @@ class GridTorch(nn.Module):
                     self.pc_logits.weight.norm(2) +
                     self.hd_logits.weight.norm(2))
 
-
     def init_tf_weights(self, loc):
-
+        
         self.pc_logits.bias = load_tf_param(loc + 'grid_cells_core_pc_logits_b:0.npy')
         self.pc_logits.weight = load_tf_param(loc + 'grid_cells_core_pc_logits_w:0.npy')
 
@@ -108,8 +106,6 @@ class GridTorch(nn.Module):
 
         self.rnn.weight = nn.Parameter(lstm_ws.transpose(1, 0))
         self.rnn.bias = nn.Parameter(lstm_bs)
-
-
 
     def forward(self, x, initial_conds):
         init = torch.cat(initial_conds, dim=1)
@@ -145,8 +141,6 @@ class GridTorch(nn.Module):
                 torch.stack(cell_states))
         return outs
 
-
-
 class TFLSTMCell(nn.Module):
 
     def __init__(self, n_inputs=3, n_units=128):
@@ -160,15 +154,8 @@ class TFLSTMCell(nn.Module):
             for i, w in enumerate(ws):
                 ws[i] = nn.init.kaiming_uniform_(w)
 
-
-
-
-
             self.weight = nn.Parameter(torch.cat(ws, dim=1), requires_grad=True)
             self.bias = nn.Parameter(torch.zeros((n_units * 4,)), requires_grad=True)
-
-
-
 
     def forward(self, x_t, state):
         """
@@ -182,8 +169,8 @@ class TFLSTMCell(nn.Module):
         i, j, f, o = torch.split(out, self.n_units, 1)
 
         g = torch.tanh(j)
-        sigmoid_f = nn.functional.sigmoid(f + 1.)
-        c_t = torch.mul(c_tm1, sigmoid_f) + torch.mul(nn.functional.sigmoid(i) ,g)
-        h_t = torch.mul(torch.tanh(c_t),nn.functional.sigmoid(o))
+        sigmoid_f = torch.sigmoid(f + 1.)
+        c_t = torch.mul(c_tm1, sigmoid_f) + torch.mul(torch.sigmoid(i) ,g)
+        h_t = torch.mul(torch.tanh(c_t), torch.sigmoid(o))
 
         return h_t, c_t
