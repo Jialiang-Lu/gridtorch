@@ -31,14 +31,68 @@ from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
+from torch import nn
 from . import ensembles  # pylint: disable=g-bad-import-order
-
-xrange=range
 
 np.seterr(invalid="ignore")
 
+to_cuda = lambda x:x.cuda()
+logsoftmax = nn.LogSoftmax(dim=-1)
 
+def cross_entropy(pred, soft_targets):
+    return torch.sum(- soft_targets * logsoftmax(pred), -1)
+
+def encode_inputs(X, y, place_cell_ensembles, head_direction_ensembles, cuda=True, coder=None):
+    init_pos , init_hd, ego_vel = X
+    target_pos, target_hd = y
+    initial_conds = encode_initial_conditions(init_pos, init_hd, place_cell_ensembles, head_direction_ensembles)
+    ensembles_targets = encode_targets(target_pos, target_hd, place_cell_ensembles, head_direction_ensembles)
+    inputs = ego_vel
+    
+    if cuda:
+        init_pos = init_pos.cuda()
+        init_hd = init_hd.cuda()
+        inputs = inputs.cuda()
+        target_pos = target_pos.cuda()
+        target_hd = target_hd.cuda()
+        initial_conds = tuple(map(to_cuda, initial_conds))
+        
+    if coder:
+        inputs = coder(inputs, value=torch.Tensor([0., 1., 0.]))
+        target_pos = coder(target_pos, target=True)
+        target_hd = coder(target_hd, target=True)
+
+    inputs = inputs.transpose(1,0)
+    return init_pos, init_hd, inputs, target_pos, target_hd, initial_conds, ensembles_targets
+
+def decode_outputs(outs, ensembles_targets, cuda=True, coder=None, n_pc=[256], n_hdc=[12]):
+    if cuda:
+        pc_targets = ensembles_targets[0].cuda()
+        hd_targets = ensembles_targets[1].cuda()
+    else:
+        pc_targets = ensembles_targets[0]
+        hd_targets = ensembles_targets[1]
+
+    logits_hd, logits_pc, bottleneck_acts, lstm_states, _ = outs
+    pc_targets, hd_targets = (pc_targets.transpose(1,0),
+                                hd_targets.transpose(1,0))
+
+    logits_pc = logits_pc.view(-1, n_pc[0])
+    logits_hd = logits_hd.view(-1, n_hdc[0])
+
+    if coder:
+        pc_targets, hd_targets = coder(pc_targets, target=True), coder(hd_targets, target=True)
+
+    pc_targets = pc_targets.contiguous().view(-1, n_pc[0])
+    hd_targets = hd_targets.contiguous().view(-1, n_hdc[0])
+
+    return bottleneck_acts, logits_pc, logits_hd, pc_targets, hd_targets
+
+def get_loss(logits_pc, logits_hd, pc_targets, hd_targets, bottleneck_acts):
+    pc_loss = cross_entropy(logits_pc, pc_targets)
+    hd_loss = cross_entropy(logits_hd, hd_targets)
+
+    return torch.mean(pc_loss + hd_loss)
 def get_place_cell_ensembles(
         env_size, neurons_seed, targets_type, lstm_init_type, n_pc, pc_scale):
     """Create the ensembles for the Place cells."""
@@ -151,7 +205,7 @@ def get_scores_and_plot(scorer,
     # Get the rate-map for each unit
     s = [
             scorer.calculate_ratemap(xy[:, 0], xy[:, 1], act[:, i])
-            for i in xrange(n_units)
+            for i in range(n_units)
     ]
     # Get the scores
     score_60, score_90, max_60_mask, max_90_mask, sac = zip(
@@ -167,7 +221,7 @@ def get_scores_and_plot(scorer,
     cols = 16
     rows = int(np.ceil(n_units / cols))
     fig = plt.figure(figsize=(24, rows * 4))
-    for i in xrange(n_units):
+    for i in range(n_units):
         rf = plt.subplot(rows * 2, cols, i + 1)
         acr = plt.subplot(rows * 2, cols, n_units + i + 1)
         if i < n_units:
